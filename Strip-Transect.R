@@ -1,18 +1,14 @@
-###exemple complet avec carte et fichier quebec
+###Standalone example of strip-transect with GeoAviR
 #FBolduc
-#18 dec 2014
+#11 nov 2016
 
 require(GeoAviR)
-#test
-#test2
-#test3
-#test4
 
 data(quebec)
 d<-filterECSAS(quebec)
 
 
-### faire un shapefile à partir des début d'observations dans les données
+### Shapfiles of watch starting points
 require(rgdal)
 transect <- data.frame(lat=d$LatStart,lon=d$LongStart)
 coordinates(transect) <- ~lon + lat
@@ -23,6 +19,8 @@ proj4string(transect)<-CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +to
 dist_res <- "U:\\Oiseaux souillés\\Inventaires pélagiques\\GeoAviR\\InterfaceGraphique0.1\\Output\\Exemples"
 setwd(dist_res)
 
+
+###get background shp (any will do)
 setwd(paste(getwd(), "/Canada",sep=""))
 setwd("..") #remonte d'un cran ds l'arborescence  (si nécéssaire)
 
@@ -40,28 +38,27 @@ posm <- which(can1@data[,"Type"] == "Quebec" |
                 can1@data[,"Type"] == "New Brunswick" ) 
 shpm <- can1[posm,]
 
-###mettre les données et le fond de carte ensemble - assurer la même projection au cas où
+###ensure similar projections
 prj <- proj4string(transect)
 shpm<-spTransform(shpm,CRS(prj)) 
 
 
-### Build a 50000 x 50000 meters grid - lat et long à partir du jeu de données? on voir plus tard avec plot(transect) que la grille sert aussi à restreinfre l'étendue spatiale
+### Build a 50000 x 50000 meters grid
 size<-50000
 new.grid<-create.grid(Latitude=c(44,52),Longitude=c(-70,-56),Grid.size=c(size,size),Clip=FALSE,clip.shape=canshp,projection=CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"))
 new.grid$ID<-paste("parc",new.grid$ID,sep="")
 
-#couper la grille pour ne garder que les cellules de la grille visitées
-new.grid<-new.grid[apply(gIntersects(transect,new.grid,byid=TRUE),1,any),] #limitation de taille de vecteur?
+#limit grid to visited cells
+new.grid<-new.grid[apply(gIntersects(transect,new.grid,byid=TRUE),1,any),] 
 
 ### Overlay transects and grid and attribute squares to observations
 x<-over(transect,new.grid)
 d$square<-x$ID
 d<-d[!is.na(d$square),]
 d$square_area<-(size/1000)^2 #in kilometers
-d$SMP_LABEL<-paste(d$square,d$Date,sep="_")
+d$SMP_LABEL<-paste(d$square,d$Date,sep="_")#date is sampling unit in this case
 
 ### Construct sample labels considering that day transects can overlap with multiple squares
-#demander à l'utilisateur, quelle variable sera le niveau de l'échantillon (WatchID, Date, autre?)
 temp<-aggregate(WatchLenKm~SMP_LABEL,data=unique(d[,c("SMP_LABEL","WatchID","WatchLenKm")]),sum)
 names(temp)[2]<-"SMP_EFFORT"
 d<-merge(d,temp,sort=FALSE)
@@ -86,56 +83,37 @@ empty<-NULL
 detection <- "All"
 breaks<-c(0,300)
 
-#detection<-"All"
-#DISTANCE <- NULL
-
-#DISTANCE<-"Distance"
 d$Distance <- NULL #remove distance var from dataset
 
 
 ##strip estimates
-
 x<-strip.wrap(d,stratum=stratum,empty=empty,detection=detection,lsub=lsub,split=split,
               path=path,pathMCDS=pathMCDS,breaks=breaks,STR_LABEL=STR_LABEL,STR_AREA=STR_AREA,
               SMP_LABEL=SMP_LABEL,SMP_EFFORT=SMP_EFFORT,SIZE=SIZE,
               units = list(Type = "Line", Distance = "Perp", Length_units = "Kilometers", 
                            Distance_units ="Meters", Area_units = "Square kilometers"), verbose=FALSE)
 
-
-#choose best model for one species of the lsub object
-#all.sp.best <- keep.best.model(x$NOFU)
-#if lsub=NULL, all.sp.best <- keep.best.model(x)
-# mod.selected <- which.min(sapply(1:6, function(i)x$NOFU[[i]]$AIC[3])) 
-# global.summary(model=x, species="NOFU", file="alcidae_global", directory="C:/temp/distance")
-
-
-
-
-
-#x<-strip.wrap(d,stratum=stratum,empty=empty,lsub=lsub,split=split,path=path,pathMCDS=pathMCDS,STR_LABEL=STR_LABEL,STR_AREA=STR_AREA,SMP_LABEL=SMP_LABEL,SMP_EFFORT=SMP_EFFORT,SIZE=SIZE,verbose=FALSE)
-
 global.summary(model=x[["NOFU"]], species=c("fulmars"), file="DetModel-NOFU2", directory="C:/temp/distance")
 
 
 
 ###################################
-######fabrication de la carte######
+######results mapping######
 
 
-#aller chercher les résultats dans l'objet x
-#une espèce en particulier :
+#get estimates
 tmp <- x$NOFU$density_estimate$Stratum 
-######si aucun sous-groupe = x$density_estimate$Stratum#####
+######if no groups used = x$density_estimate$Stratum#####
 
 densities <- tmp[tmp$Parameters == "D",c("Stratum","Estimates","% of var.")]
 
-####save shp - grille + données assocées aux cellules
+####save shp - grid with estiamtes within cell
 densities$Estimates <- as.numeric(densities$Estimates)
 names(densities)[3] <- "CoefVar" #probleme avec % dans nom
 densities$CoefVar <- as.numeric(densities$CoefVar)
 names(densities)[names(densities) == "Stratum"] <- "ID"
 
-##change extremes with 99% percentile
+##change extremes with 99% percentile if needed
 p99 <- quantile(densities$Estimates, c(.995)) #ok
 densities$Estimates <- ifelse(densities$Estimates > p99,p99,densities$Estimates)
 
@@ -186,7 +164,6 @@ titre <- "Observed densities"
 setwd("C:\\temp\\distance")
 legendtitle <- "birds/km2"
 
-#l'emplacement de la legende pourrait être problématique...
 #png(paste(titre,".png",sep=""),width=960,height=960)
 plot(new.grid2,axes=T)
 plot(new.grid2[new.grid2$class==tags[1],],col=pal[1],add=T)
